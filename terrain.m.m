@@ -1,71 +1,9 @@
 % Riya Sachdeva (2022411) Sarthak Kalpasi (2021197)
-% 07/05/2025
+% 05/05/2025
 % RS Project 2025
 % SAR Stripmap Simulation for Point Targets and Terrain
 
 clear; close all; clc;
-
-%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Radar Parameters
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Speed of Light (m/s)
-c_mps = 3e8;
-
-% Center frequency (Hz)
-Fc_Hz = 1e9;
-
-% Wavelength (m)
-wavelength_m = c_mps / Fc_Hz;
-
-% Bandwidth (Hz)
-bw_fast_Hz = 30e6;
-
-% Sampling frequency (Hz)
-fs_Hz = 2 * bw_fast_Hz;
-
-% Set the Pulse Repetition Frequency (Hz) to create an integer ratio with fs
-PRF_Hz = 300;
-
-% Pulse Repetition Interval (s)
-PRI_s = 1/PRF_Hz;
-
-% Pulse Width (s)
-T_s = 3e-6;
-
-% Range Resolution (m)
-rangeres_m = bw2rangeres(bw_fast_Hz);
-
-% Radar aperture length (m)
-aperture_length_m = 6;
-
-% Transmit Power (W)
-Ptx_W = 50e3;
-
-%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Platform Parameters
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Platform velocity (m/s)
-v_mps = 100;
-
-% Coherent Processing Interval (s)
-CPI_s = 0.3;
-
-% Radar platform altitude (m)
-altitude_m = 1000;
-
-% Initial radar platform position (m)
-rdrpos1 = [0 0 altitude_m];
-
-% Radar platform velocity vector (m/s)
-rdrvel = [0 v_mps 0];
-
-% Final radar platform position after the data collection duration (m)
-rdrpos2 = rdrvel*CPI_s + rdrpos1;
-
-% Calculate SAR aperture length (m)
-sar_len_m = sarlen(v_mps, CPI_s);
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -101,13 +39,63 @@ helperPlotSimulatedTerrain(xvec,yvec,A);
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Target Parameters
+% Radar Parameters
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Target positions (m)
-targetpos = [1000,sar_len_m/2,0;1050,sar_len_m/2,0;1070,sar_len_m/2,0];
+% Define radar center frequency (Hz)
+freq_Hz = 1e9;
 
-% Target heights (m)
-tgthgts = [110, 112, 115];
+% Calculate wavelength (m) and speed of light (m/s) from frequency
+[lambda_m,c_mps] = freq2wavelen(freq_Hz);
+
+% Define radar bandwidth (Hz)
+bw_Hz = 30e6;
+
+% Define radar sampling frequency (Hz)
+fs_Hz = 60e6;
+
+% Define transmit pulse duration (s)
+tpd_s = 3e-6;
+
+% Calculate range resolution (m) from bandwidth
+rngRes_m = bw2rangeres(bw_Hz);
+
+% Define radar aperture length (m)
+apertureLength_m = 6;
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Platform Parameters
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Optimized platform velocity (m/s)
+v_mps = 100;
+
+% Data collection duration (s)
+dur_s = 0.3;
+
+% Radar platform altitude (m)
+rdrhgt_m = 1000;
+
+% Initial radar platform position (m)
+rdrpos1 = [0 0 rdrhgt_m];
+
+% Radar platform velocity vector (m/s)
+rdrvel = [0 v_mps 0];
+
+% Final radar platform position after the data collection duration (m)
+rdrpos2 = rdrvel*dur_s + rdrpos1;
+
+% Calculate SAR aperture length (m)
+len_m = sarlen(v_mps,dur_s);
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Target Configuration
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Define target positions (m)
+targetpos = [1000,len_m/2,0;1020,len_m/2,0;1040,len_m/2,0];
+
+% Initialize target heights (m)
+tgthgts = 110*ones(1,3);
 
 % Adjust target heights based on terrain elevation at their locations
 for it = 1:3
@@ -123,20 +111,30 @@ end
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Ground Truth
+% SAR Processing Parameters
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Calculate the center range (m) to the targets
-rc_m = sqrt((altitude_m - mean(tgthgts))^2 + (mean(targetpos(:,1)))^2);
+rc_m = sqrt((rdrhgt_m - mean(tgthgts))^2 + (mean(targetpos(:,1)))^2);
 
 % Calculate the depression angle (degrees) to the targets
-depang_deg = depressionang(altitude_m,rc_m,'Flat','TargetHeight',mean(tgthgts));
+depang_deg = depressionang(rdrhgt_m,rc_m,'Flat','TargetHeight',mean(tgthgts));
 
 % Grazing angle is approximately equal to the depression angle in this scenario
 grazang_deg = depang_deg;
 
+% Calculate potential swath width and minimum/maximum range (not used later in this script but informative)
+[~,~] = aperture2swath(rc_m,lambda_m,apertureLength_m,grazang_deg);
+
+% Calculate PRF bounds (not used later in this script but informative)
+[~,~] = sarprfbounds(v_mps,bw2rangeres(bw_Hz),len_m,grazang_deg);
+
+% Set the Pulse Repetition Frequency (PRF) to create an integer ratio with fs
+% This simplifies some processing steps
+prf_Hz = 300;
+
 % Display the chosen PRF and check if the ratio with fs is an integer
 fprintf('PRF: %d Hz, fs/PRF ratio: %d (integer check: %d)\n', ...
-    PRF_Hz, fs_Hz/PRF_Hz, mod(fs_Hz/PRF_Hz,1)==0);
+    prf_Hz, fs_Hz/prf_Hz, mod(fs_Hz/prf_Hz,1)==0);
 
 % Plot the ground truth: terrain, radar path, and target positions
 helperPlotGroundTruth(xvec,yvec,A,rdrpos1,rdrpos2,targetpos);
@@ -181,7 +179,7 @@ reflectivityMap = surfaceReflectivity('Custom','Frequency',freqTable,...
 fprintf('Creating radar scenario...\n');
 
 % Create a radar scenario object
-scene = radarScenario('UpdateRate',PRF_Hz,'IsEarthCentered',false,'StopTime',CPI_s);
+scene = radarScenario('UpdateRate',prf_Hz,'IsEarthCentered',false,'StopTime',dur_s);
 
 % Add the radar platform to the scenario
 rdrplat = platform(scene,'Trajectory',kinematicTrajectory('Position',rdrpos1,'Velocity',[0 v_mps 0]));
@@ -204,28 +202,28 @@ rdr = radarTransceiver('MountingAngles',mountAngles,'NumRepetitions',1,...
     'RangeLimits',[0 maxRange_m]);
 
 % Set radar transceiver parameters
-rdr.Transmitter.PeakPower = Ptx_W; % Peak transmit power (W)
+rdr.Transmitter.PeakPower = 50e3; % Peak transmit power (W)
 rdr.Receiver.SampleRate = fs_Hz; % Receiver sample rate (Hz)
 rdr.Receiver.NoiseFigure = 30; % Receiver noise figure (dB)
 
 % Define the radar antenna using a Sinc antenna element
-antbw_deg = ap2beamwidth(aperture_length_m,wavelength_m); % Calculate antenna beamwidth
+antbw_deg = ap2beamwidth(apertureLength_m,lambda_m); % Calculate antenna beamwidth
 ant = phased.SincAntennaElement('FrequencyRange',[1e9 10e9],'Beamwidth',antbw_deg);
 
 % Assign the antenna to the transmit and receive paths
 rdr.TransmitAntenna.Sensor = ant;
-rdr.TransmitAntenna.OperatingFrequency = Fc_Hz;
+rdr.TransmitAntenna.OperatingFrequency = freq_Hz;
 rdr.ReceiveAntenna.Sensor = ant;
-rdr.ReceiveAntenna.OperatingFrequency = Fc_Hz;
+rdr.ReceiveAntenna.OperatingFrequency = freq_Hz;
 
 % Calculate and set antenna gain
-antennaGain = aperture2gain(aperture_length_m^2,wavelength_m);
+antennaGain = aperture2gain(apertureLength_m^2,lambda_m);
 rdr.Transmitter.Gain = antennaGain;
 rdr.Receiver.Gain = antennaGain;
 
 % Configure the Linear FM waveform for the radar
-rdr.Waveform = phased.LinearFMWaveform('SampleRate',fs_Hz,'PulseWidth',T_s,...
-    'PRF',PRF_Hz,'SweepBandwidth',bw_fast_Hz);
+rdr.Waveform = phased.LinearFMWaveform('SampleRate',fs_Hz,'PulseWidth',tpd_s,...
+    'PRF',prf_Hz,'SweepBandwidth',bw_Hz);
 
 % Add the radar transceiver to the radar platform
 rdrplat.Sensors = rdr;
@@ -237,51 +235,59 @@ rdrplat.Sensors = rdr;
 fprintf('Generating clutter...\n');
 
 % Configure clutter generation within the scenario
-clutterGenerator(scene,rdr,'Resolution',rangeres_m,'RangeLimit',maxRange_m);
+clutterGenerator(scene,rdr,'Resolution',rngRes_m,'RangeLimit',maxRange_m);
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Received Signal
+% IQ Data Collection Setup
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Define the minimum sample for collecting data
+% Define the minimum sample for collecting data (to exclude direct blast)
 minSample = 500;
 
 % Calculate the maximum range time and corresponding sample index
 maxRange_time = range2time(maxRange_m);
 truncRngSamp = ceil(maxRange_time*fs_Hz);
 
-% Number of fats time samples (less smaples collected for faster processing)
-Nfast_nu = floor(truncRngSamp - minSample + 1);
+% Calculate the number of range samples to collect
+rangeSamples = floor(truncRngSamp - minSample + 1);
 
-% Number of slow time samples (no units)
-Nslow_nu = floor(CPI_s/PRI_s + 1);
+% Calculate the pulse repetition interval (s)
+T = 1/prf_Hz;
+
+% Calculate the total number of pulses to collect
+numPulses = floor(dur_s/T + 1);
 
 % Display the number of range samples and pulses
-fprintf('Range samples: %d, Number of pulses: %d\n', Nfast_nu, Nslow_nu);
+fprintf('Range samples: %d, Number of pulses: %d\n', rangeSamples, numPulses);
 
-% Received Signal
-srx_volts = zeros(Nfast_nu, Nslow_nu);
+% Initialize a matrix to store the collected raw IQ data
+raw = zeros(rangeSamples, numPulses);
 
-fprintf('Collecting radar data (%d pulses)...\n', Nslow_nu);
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Data Collection
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+fprintf('Collecting radar data (%d pulses)...\n', numPulses);
 
 % Initialize a counter for collected pulses
 ii = 1;
 
 % Create a figure to visualize the raw IQ data as it is collected
-hRaw = helperPlotRawIQ(srx_volts,minSample);
+hRaw = helperPlotRawIQ(raw,minSample);
 
 % Advance the scenario and collect data for each pulse
 while advance(scene)
     % Receive radar data for the current time step
-    rxsig = receive(scene);
+    tmp = receive(scene);
     % Extract the relevant range samples and store in the raw data matrix
-    srx_volts(:,ii) = rxsig{1}(minSample:truncRngSamp);
+    raw(:,ii) = tmp{1}(minSample:truncRngSamp);
 
     % Update the plot periodically to show data collection progress
     if mod(ii,5) == 0
-        helperUpdatePlotRawIQ(hRaw,srx_volts);
+        helperUpdatePlotRawIQ(hRaw,raw);
     end
 
+    % Increment the pulse counter
     ii = ii + 1;
 end
 
@@ -292,10 +298,10 @@ end
 fprintf('Processing SAR image...\n');
 
 % Perform range migration processing on the raw IQ data to create an SLC image
-slcimg = rangeMigrationLFM(srx_volts,rdr.Waveform,Fc_Hz,v_mps,rc_m);
+slcimg = rangeMigrationLFM(raw,rdr.Waveform,freq_Hz,v_mps,rc_m);
 
 % Plot the generated SLC image alongside the ground truth
-helperPlotSLC(slcimg,minSample,fs_Hz,v_mps,PRF_Hz,rdrpos1,targetpos,xvec,yvec,A);
+helperPlotSLC(slcimg,minSample,fs_Hz,v_mps,prf_Hz,rdrpos1,targetpos,xvec,yvec,A);
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -306,11 +312,11 @@ fprintf('\nTarget Visibility Summary:\n');
 % Analyze the visibility of each target throughout the data collection
 for it = 1:3
     % Initialize an array to track occlusion for each pulse
-    occ = false(1,Nslow_nu);
+    occ = false(1,numPulses);
     % Iterate through each pulse to check for occlusion
-    for ip = 1:Nslow_nu
+    for ip = 1:numPulses
         % Calculate the radar position at the time of this pulse
-        rdrpos = rdrpos1 + rdrvel.*1/PRF_Hz*(ip - 1);
+        rdrpos = rdrpos1 + rdrvel.*1/prf_Hz*(ip - 1);
         % Check if the target is occluded by the terrain at this radar position
         occ(ip) = s.occlusion(rdrpos,targetpos(it,:));
     end
@@ -320,7 +326,7 @@ end
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Helper Functions 
+% Helper Functions (Provided)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % --- Helper function to generate random terrain ---
@@ -428,19 +434,19 @@ end
 function hRaw = helperPlotRawIQ(raw,minSample)
     figure('Position',[750 100 600 400]);
     [m,n] = size(raw);
-    hRaw = pcolor(1:n,minSample:(m + minSample - 1),real(raw));
+    hRaw = pcolor(minSample:(m + minSample - 1),1:n,real(raw.'));
     hRaw.EdgeColor = 'none';
-    title('Real Part of Received Signal')
-    xlabel('Cross Range (m)')
-    ylabel('Range (m)')
+    title('Raw Data')
+    xlabel('Range Samples')
+    ylabel('Cross-range Samples')
     hC = colorbar;
     clim([-0.06 0.06])
-    hC.Label.String = 'Received Signal';
+    hC.Label.String = 'real(IQ)';
 end
 
 % --- Helper function to update the raw IQ data visualization plot ---
 function helperUpdatePlotRawIQ(hRaw,raw)
-    hRaw.CData = real(raw);
+    hRaw.CData = real(raw.');
     clim([-0.06 0.06]);
     drawnow limitrate;
 end
@@ -482,17 +488,17 @@ function helperPlotSLC(slcimg,minSample,fs,v,~,~,targetpos,xvec,yvec,A)
     y = linspace(0, 100, numPulses);
 
     slcimg = abs(slcimg).';
-    hProc = pcolor(y,rngVec,slcimg.');
+    hProc = pcolor(rngVec,y,slcimg);
     hProc.EdgeColor = 'none';
     colormap(hProc.Parent,parula)
     hC = colorbar('southoutside');
     hC.Label.String = 'Magnitude';
-    xlabel('Cross Range (m)')
-    ylabel('Range (m)')
+    xlabel('Slant Range (m)')
+    ylabel('Cross-range (m)')
     title('SAR Image')
     axis equal
-    ylim([1250 1420])
-    xlim([0 100])
+    xlim([1250 1420])
+    ylim([0 100])
 end
 
 % --- Helper function to get and display target visibility status ---

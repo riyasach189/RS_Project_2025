@@ -1,71 +1,9 @@
 % Riya Sachdeva (2022411) Sarthak Kalpasi (2021197)
-% 07/05/2025
+% 05/07/2025
 % RS Project 2025
 % SAR Stripmap Simulation for Point Targets and Terrain with Weather Effects
 
 clear; close all; clc;
-
-%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Radar Parameters
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Speed of Light (m/s)
-c_mps = 3e8;
-
-% Center frequency (Hz)
-Fc_Hz = 1e9;
-
-% Wavelength (m)
-wavelength_m = c_mps / Fc_Hz;
-
-% Bandwidth (Hz)
-bw_fast_Hz = 30e6;
-
-% Sampling frequency (Hz)
-fs_Hz = 2 * bw_fast_Hz;
-
-% Set the Pulse Repetition Frequency (Hz) to create an integer ratio with fs
-PRF_Hz = 300;
-
-% Pulse Repetition Interval (s)
-PRI_s = 1/PRF_Hz;
-
-% Pulse Width (s)
-T_s = 3e-6;
-
-% Calculate range resolution (m) from bandwidth
-rangeres_m = bw2rangeres(bw_fast_Hz);
-
-% Define radar aperture length (m)
-aperture_length_m = 6;
-
-% Transmit Power (W)
-Ptx_W = 50e3;
-
-%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Platform Parameters
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Platform velocity (m/s)
-v_mps = 100;
-
-% Coherent Processing Interval (s)
-CPI_s = 0.3;
-
-% Radar platform altitude (m)
-altitude_m = 1000;
-
-% Initial radar platform position (m)
-rdrpos1 = [0 0 altitude_m];
-
-% Radar platform velocity vector (m/s)
-rdrvel = [0 v_mps 0];
-
-% Final radar platform position after the data collection duration (m)
-rdrpos2 = rdrvel*CPI_s + rdrpos1;
-
-% Calculate SAR aperture length (m)
-sar_len_m = sarlen(v_mps, CPI_s);
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -101,13 +39,63 @@ helperPlotSimulatedTerrain(xvec,yvec,A);
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Target Parameters
+% Radar Parameters
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Target positions (m)
-targetpos = [1000,sar_len_m/2,0;1050,sar_len_m/2,0;1070,sar_len_m/2,0];
+% Define radar center frequency (Hz)
+freq_Hz = 1e9;
 
-% Target heights (m)
-tgthgts = [110, 112, 115];
+% Calculate wavelength (m) and speed of light (m/s) from frequency
+[lambda_m,c_mps] = freq2wavelen(freq_Hz);
+
+% Define radar bandwidth (Hz)
+bw_Hz = 30e6;
+
+% Define radar sampling frequency (Hz)
+fs_Hz = 60e6;
+
+% Define transmit pulse duration (s)
+tpd_s = 3e-6;
+
+% Calculate range resolution (m) from bandwidth
+rngRes_m = bw2rangeres(bw_Hz);
+
+% Define radar aperture length (m)
+apertureLength_m = 6;
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Platform Parameters
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Optimized platform velocity (m/s)
+v_mps = 100;
+
+% Data collection duration (s)
+dur_s = 0.3;
+
+% Radar platform altitude (m)
+rdrhgt_m = 1000;
+
+% Initial radar platform position (m)
+rdrpos1 = [0 0 rdrhgt_m];
+
+% Radar platform velocity vector (m/s)
+rdrvel = [0 v_mps 0];
+
+% Final radar platform position after the data collection duration (m)
+rdrpos2 = rdrvel*dur_s + rdrpos1;
+
+% Calculate SAR aperture length (m)
+len_m = sarlen(v_mps,dur_s);
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Target Configuration
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Define target positions (m)
+targetpos = [1000,len_m/2,0;1020,len_m/2,0;1040,len_m/2,0];
+
+% Initialize target heights (m)
+tgthgts = 110*ones(1,3);
 
 % Adjust target heights based on terrain elevation at their locations
 for it = 1:3
@@ -123,20 +111,30 @@ end
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Ground Truth
+% SAR Processing Parameters
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Calculate the center range (m) to the targets
-rc_m = sqrt((altitude_m - mean(tgthgts))^2 + (mean(targetpos(:,1)))^2);
+rc_m = sqrt((rdrhgt_m - mean(tgthgts))^2 + (mean(targetpos(:,1)))^2);
 
 % Calculate the depression angle (degrees) to the targets
-depang_deg = depressionang(altitude_m,rc_m,'Flat','TargetHeight',mean(tgthgts));
+depang_deg = depressionang(rdrhgt_m,rc_m,'Flat','TargetHeight',mean(tgthgts));
 
 % Grazing angle is approximately equal to the depression angle in this scenario
 grazang_deg = depang_deg;
 
+% Calculate potential swath width and minimum/maximum range (not used later in this script but informative)
+[~,~] = aperture2swath(rc_m,lambda_m,apertureLength_m,grazang_deg);
+
+% Calculate PRF bounds (not used later in this script but informative)
+[~,~] = sarprfbounds(v_mps,bw2rangeres(bw_Hz),len_m,grazang_deg);
+
+% Set the Pulse Repetition Frequency (PRF) to create an integer ratio with fs
+% This simplifies some processing steps
+prf_Hz = 300;
+
 % Display the chosen PRF and check if the ratio with fs is an integer
 fprintf('PRF: %d Hz, fs/PRF ratio: %d (integer check: %d)\n', ...
-    PRF_Hz, fs_Hz/PRF_Hz, mod(fs_Hz/PRF_Hz,1)==0);
+    prf_Hz, fs_Hz/prf_Hz, mod(fs_Hz/prf_Hz,1)==0);
 
 % Plot the ground truth: terrain, radar path, and target positions
 helperPlotGroundTruth(xvec,yvec,A,rdrpos1,rdrpos2,targetpos);
@@ -180,13 +178,13 @@ reflectivityMap = surfaceReflectivity('Custom','Frequency',freqTable,...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Define weather condition intensities
 % Rain rates in mm/hour
-rainRates = [5, 25, 100];  % Low, Medium, High
+rainRates = [1, 200, 1000];  % Low, Medium, High
 % Snow rates in mm/hour
-snowRates = [1, 2.5, 5];  % Low, Medium, High
+snowRates = [5, 50, 300];  % Low, Medium, High
 % Fog visibility in meters
 fogVisibility = [500, 200, 50];  % Low, Medium, High
 
-% Weather Names
+% Names for labeling
 weatherNames = {'Clear', 'Rain-Low', 'Rain-Medium', 'Rain-High', ...
                 'Snow-Low', 'Snow-Medium', 'Snow-High', ...
                 'Fog-Low', 'Fog-Medium', 'Fog-High'};
@@ -198,7 +196,7 @@ weatherNames = {'Clear', 'Rain-Low', 'Rain-Medium', 'Rain-High', ...
 fprintf('Creating radar scenario...\n');
 
 % Create a radar scenario object
-scene = radarScenario('UpdateRate',PRF_Hz,'IsEarthCentered',false,'StopTime',CPI_s);
+scene = radarScenario('UpdateRate',prf_Hz,'IsEarthCentered',false,'StopTime',dur_s);
 
 % Add the radar platform to the scenario
 rdrplat = platform(scene,'Trajectory',kinematicTrajectory('Position',rdrpos1,'Velocity',[0 v_mps 0]));
@@ -221,28 +219,28 @@ rdr = radarTransceiver('MountingAngles',mountAngles,'NumRepetitions',1,...
     'RangeLimits',[0 maxRange_m]);
 
 % Set radar transceiver parameters
-rdr.Transmitter.PeakPower = Ptx_W; % Peak transmit power (W)
+rdr.Transmitter.PeakPower = 50e3; % Peak transmit power (W)
 rdr.Receiver.SampleRate = fs_Hz; % Receiver sample rate (Hz)
 rdr.Receiver.NoiseFigure = 30; % Receiver noise figure (dB)
 
 % Define the radar antenna using a Sinc antenna element
-antbw_deg = ap2beamwidth(aperture_length_m,wavelength_m); % Calculate antenna beamwidth
+antbw_deg = ap2beamwidth(apertureLength_m,lambda_m); % Calculate antenna beamwidth
 ant = phased.SincAntennaElement('FrequencyRange',[1e9 10e9],'Beamwidth',antbw_deg);
 
 % Assign the antenna to the transmit and receive paths
 rdr.TransmitAntenna.Sensor = ant;
-rdr.TransmitAntenna.OperatingFrequency = Fc_Hz;
+rdr.TransmitAntenna.OperatingFrequency = freq_Hz;
 rdr.ReceiveAntenna.Sensor = ant;
-rdr.ReceiveAntenna.OperatingFrequency = Fc_Hz;
+rdr.ReceiveAntenna.OperatingFrequency = freq_Hz;
 
 % Calculate and set antenna gain
-antennaGain = aperture2gain(aperture_length_m^2,wavelength_m);
+antennaGain = aperture2gain(apertureLength_m^2,lambda_m);
 rdr.Transmitter.Gain = antennaGain;
 rdr.Receiver.Gain = antennaGain;
 
 % Configure the Linear FM waveform for the radar
-rdr.Waveform = phased.LinearFMWaveform('SampleRate',fs_Hz,'PulseWidth',T_s,...
-    'PRF',PRF_Hz,'SweepBandwidth',bw_fast_Hz);
+rdr.Waveform = phased.LinearFMWaveform('SampleRate',fs_Hz,'PulseWidth',tpd_s,...
+    'PRF',prf_Hz,'SweepBandwidth',bw_Hz);
 
 % Add the radar transceiver to the radar platform
 rdrplat.Sensors = rdr;
@@ -254,11 +252,11 @@ rdrplat.Sensors = rdr;
 fprintf('Generating clutter...\n');
 
 % Configure clutter generation within the scenario
-clutterGenerator(scene,rdr,'Resolution',rangeres_m,'RangeLimit',maxRange_m);
+clutterGenerator(scene,rdr,'Resolution',rngRes_m,'RangeLimit',maxRange_m);
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Received Signal
+% IQ Data Collection Setup
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Define the minimum sample for collecting data (to exclude direct blast)
 minSample = 500;
@@ -270,8 +268,11 @@ truncRngSamp = ceil(maxRange_time*fs_Hz);
 % Calculate the number of range samples to collect
 rangeSamples = floor(truncRngSamp - minSample + 1);
 
+% Calculate the pulse repetition interval (s)
+T = 1/prf_Hz;
+
 % Calculate the total number of pulses to collect
-numPulses = floor(CPI_s/PRI_s + 1);
+numPulses = floor(dur_s/T + 1);
 
 % Display the number of range samples and pulses
 fprintf('Range samples: %d, Number of pulses: %d\n', rangeSamples, numPulses);
@@ -293,6 +294,7 @@ rawData{1} = zeros(rangeSamples, numPulses);
 ii = 1;
 
 % Create a figure for raw IQ data visualization
+figure('Position',[750 100 600 400]);
 hRawPlot = helperPlotRawIQ(rawData{1}, minSample);
 
 while advance(scene)
@@ -307,7 +309,7 @@ while advance(scene)
 end
 
 % Process clear weather data
-slcImages{1} = rangeMigrationLFM(rawData{1}, rdr.Waveform, Fc_Hz, v_mps, rc_m);
+slcImages{1} = rangeMigrationLFM(rawData{1}, rdr.Waveform, freq_Hz, v_mps, rc_m);
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -322,7 +324,7 @@ for i = 1:3
     fprintf('Collecting data for Rain (%d mm/hr)...\n', rainRates(i));
     
     % Create a new scenario for each weather condition
-    weatherScene = radarScenario('UpdateRate', PRF_Hz, 'IsEarthCentered', false, 'StopTime', CPI_s);
+    weatherScene = radarScenario('UpdateRate', prf_Hz, 'IsEarthCentered', false, 'StopTime', dur_s);
     
     % Add platform, targets and land surface as before
     weatherPlatform = platform(weatherScene, 'Trajectory', kinematicTrajectory('Position', rdrpos1, 'Velocity', [0 v_mps 0]));
@@ -336,7 +338,7 @@ for i = 1:3
         'RadarReflectivity', reflectivityMap, 'ReflectivityMap', reflectivityType);
     
     % Configure clutter for the new scenario
-    clutterGenerator(weatherScene, rdr, 'Resolution', rangeres_m, 'RangeLimit', maxRange_m);
+    clutterGenerator(weatherScene, rdr, 'Resolution', rngRes_m, 'RangeLimit', maxRange_m);
     
     % Collect data for this weather condition
     rawData{weatherIdx} = zeros(rangeSamples, numPulses);
@@ -357,7 +359,7 @@ for i = 1:3
     end
     
     % Process the weather-affected data
-    slcImages{weatherIdx} = rangeMigrationLFM(rawData{weatherIdx}, rdr.Waveform, Fc_Hz, v_mps, rc_m);
+    slcImages{weatherIdx} = rangeMigrationLFM(rawData{weatherIdx}, rdr.Waveform, freq_Hz, v_mps, rc_m);
 end
 
 % Snow (Low, Medium, High)
@@ -366,7 +368,7 @@ for i = 1:3
     fprintf('Collecting data for Snow (%g mm/hr)...\n', snowRates(i));
     
     % Create a new scenario for each weather condition
-    weatherScene = radarScenario('UpdateRate', PRF_Hz, 'IsEarthCentered', false, 'StopTime', CPI_s);
+    weatherScene = radarScenario('UpdateRate', prf_Hz, 'IsEarthCentered', false, 'StopTime', dur_s);
     
     % Add platform, targets and land surface as before
     weatherPlatform = platform(weatherScene, 'Trajectory', kinematicTrajectory('Position', rdrpos1, 'Velocity', [0 v_mps 0]));
@@ -380,7 +382,7 @@ for i = 1:3
         'RadarReflectivity', reflectivityMap, 'ReflectivityMap', reflectivityType);
     
     % Configure clutter for the new scenario
-    clutterGenerator(weatherScene, rdr, 'Resolution', rangeres_m, 'RangeLimit', maxRange_m);
+    clutterGenerator(weatherScene, rdr, 'Resolution', rngRes_m, 'RangeLimit', maxRange_m);
     
     % Collect data for this weather condition
     rawData{weatherIdx} = zeros(rangeSamples, numPulses);
@@ -401,7 +403,7 @@ for i = 1:3
     end
     
     % Process the weather-affected data
-    slcImages{weatherIdx} = rangeMigrationLFM(rawData{weatherIdx}, rdr.Waveform, Fc_Hz, v_mps, rc_m);
+    slcImages{weatherIdx} = rangeMigrationLFM(rawData{weatherIdx}, rdr.Waveform, freq_Hz, v_mps, rc_m);
 end
 
 % Fog (Low, Medium, High)
@@ -410,7 +412,7 @@ for i = 1:3
     fprintf('Collecting data for Fog (%d m visibility)...\n', fogVisibility(i));
     
     % Create a new scenario for each weather condition
-    weatherScene = radarScenario('UpdateRate', PRF_Hz, 'IsEarthCentered', false, 'StopTime', CPI_s);
+    weatherScene = radarScenario('UpdateRate', prf_Hz, 'IsEarthCentered', false, 'StopTime', dur_s);
     
     % Add platform, targets and land surface as before
     weatherPlatform = platform(weatherScene, 'Trajectory', kinematicTrajectory('Position', rdrpos1, 'Velocity', [0 v_mps 0]));
@@ -424,7 +426,7 @@ for i = 1:3
         'RadarReflectivity', reflectivityMap, 'ReflectivityMap', reflectivityType);
     
     % Configure clutter for the new scenario
-    clutterGenerator(weatherScene, rdr, 'Resolution', rangeres_m, 'RangeLimit', maxRange_m);
+    clutterGenerator(weatherScene, rdr, 'Resolution', rngRes_m, 'RangeLimit', maxRange_m);
     
     % Collect data for this weather condition
     rawData{weatherIdx} = zeros(rangeSamples, numPulses);
@@ -438,7 +440,7 @@ for i = 1:3
         % Apply fog attenuation - using a simplified model
         % Simplified model: 0.4 * freq_GHz^2 / visibility_km dB/km
         visibility_km = fogVisibility(i)/1000;  % Convert m to km
-        attenuationDb = 0.4 * (Fc_Hz/1e9)^2 / visibility_km * (targetRange/1000);
+        attenuationDb = 0.4 * (freq_Hz/1e9)^2 / visibility_km * (targetRange/1000);
         attenuationFactor = 10^(-attenuationDb/20);
         rawData{weatherIdx}(:, pulseIdx) = sampleData * attenuationFactor;
         
@@ -446,7 +448,7 @@ for i = 1:3
     end
     
     % Process the weather-affected data
-    slcImages{weatherIdx} = rangeMigrationLFM(rawData{weatherIdx}, rdr.Waveform, Fc_Hz, v_mps, rc_m);
+    slcImages{weatherIdx} = rangeMigrationLFM(rawData{weatherIdx}, rdr.Waveform, freq_Hz, v_mps, rc_m);
 end
 
 
@@ -455,7 +457,7 @@ end
 % Plot SAR Images
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Plot SAR image for clear weather (original)
-helperPlotSLC(slcImages{1}, minSample, fs_Hz, v_mps, PRF_Hz, rdrpos1, targetpos, xvec, yvec, A);
+helperPlotSLC(slcImages{1}, minSample, fs_Hz, v_mps, prf_Hz, rdrpos1, targetpos, xvec, yvec, A);
 
 % Plot weather comparison figures
 % Rain comparison
@@ -482,7 +484,7 @@ end
 for i = 2:4
     nexttile;
     slcimg = abs(slcImages{i}).';
-    pcolor(y, rngVec, slcimg.');
+    pcolor(rngVec, y, slcimg);
     shading flat;
     colormap(parula);
     clim([0 maxVal]);
@@ -491,15 +493,15 @@ for i = 2:4
         colorbar('eastoutside');
     end
     
-    xlabel('Cross Range (m)');
+    xlabel('Slant Range (m)');
     if i == 2
-        ylabel('Range (m)');
+        ylabel('Cross-range (m)');
     end
     
     title(sprintf('Rain: %d mm/hr', rainRates(i-1)));
     axis equal;
-    ylim([1250 1420]);
-    xlim([0 100]);
+    xlim([1250 1420]);
+    ylim([0 100]);
 end
 sgtitle('SAR Image Comparison - Rain Conditions', 'FontSize', 14);
 
@@ -517,7 +519,7 @@ end
 for i = 5:7
     nexttile;
     slcimg = abs(slcImages{i}).';
-    pcolor(y, rngVec, slcimg.');
+    pcolor(rngVec, y, slcimg);
     shading flat;
     colormap(parula);
     clim([0 maxVal]);
@@ -526,15 +528,15 @@ for i = 5:7
         colorbar('eastoutside');
     end
     
-    xlabel('Cross Range (m)');
+    xlabel('Slant Range (m)');
     if i == 5
-        ylabel('Range (m)');
+        ylabel('Cross-range (m)');
     end
     
     title(sprintf('Snow: %g mm/hr', snowRates(i-4)));
     axis equal;
-    ylim([1250 1420]);
-    xlim([0 100]);
+    xlim([1250 1420]);
+    ylim([0 100]);
 end
 sgtitle('SAR Image Comparison - Snow Conditions', 'FontSize', 14);
 
@@ -552,7 +554,7 @@ end
 for i = 8:10
     nexttile;
     slcimg = abs(slcImages{i}).';
-    pcolor(y, rngVec, slcimg.');
+    pcolor(rngVec, y, slcimg);
     shading flat;
     colormap(parula);
     clim([0 maxVal]);
@@ -561,15 +563,15 @@ for i = 8:10
         colorbar('eastoutside');
     end
     
-    xlabel('Cross Range (m)');
+    xlabel('Slant Range (m)');
     if i == 8
-        ylabel('Range (m)');
+        ylabel('Cross-range (m)');
     end
     
     title(sprintf('Fog: %d m visibility', fogVisibility(i-7)));
     axis equal;
-    ylim([1250 1420]);
-    xlim([0 100]);
+    xlim([1250 1420]);
+    ylim([0 100]);
 end
 sgtitle('SAR Image Comparison - Fog Conditions', 'FontSize', 14);
 
@@ -586,7 +588,7 @@ for it = 1:3
     % Iterate through each pulse to check for occlusion
     for ip = 1:numPulses
         % Calculate the radar position at the time of this pulse
-        rdrpos = rdrpos1 + rdrvel.*1/PRF_Hz*(ip - 1);
+        rdrpos = rdrpos1 + rdrvel.*1/prf_Hz*(ip - 1);
         % Check if the target is occluded by the terrain at this radar position
         occ(ip) = s.occlusion(rdrpos,targetpos(it,:));
     end
@@ -596,7 +598,130 @@ end
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Helper Functions
+% Target Visibility Analysis for All Weather Conditions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+fprintf('\nTarget Visibility Analysis for All Weather Conditions:\n');
+
+% Map indices to condition names for reporting
+weatherNames = {'Clear', 'Rain-Low', 'Rain-Medium', 'Rain-High', ...
+                'Snow-Low', 'Snow-Medium', 'Snow-High', ...
+                'Fog-Low', 'Fog-Medium', 'Fog-High'};
+
+% Calculate range vector for target localization
+c = physconst('LightSpeed');
+numSamples = size(slcImages{1}, 1);
+samples = minSample:(numSamples + minSample - 1);
+sampleTime = samples*1/fs_Hz;
+rngVec = time2range(sampleTime(1:end), c);
+
+% Calculate cross-range vector
+numPulses = size(slcImages{1}, 2);
+crossRngVec = linspace(0, 100, numPulses);
+
+% Target slant ranges (approximate)
+targetSlantRanges = sqrt(targetpos(:,1).^2 + targetpos(:,3).^2);
+
+% Find target indices in SLC images
+targetIndices = zeros(3, 2); % 3 targets, 2 dimensions (range, cross-range)
+for i = 1:3
+    % Find closest range bin
+    [~, targetIndices(i,1)] = min(abs(rngVec - targetSlantRanges(i)));
+    
+    % Find closest cross-range bin (assuming targets are centered in crossrange)
+    [~, targetIndices(i,2)] = min(abs(crossRngVec - targetpos(i,2)));
+end
+
+% Window size for target analysis (pixels)
+windowSize = 5;
+
+% Initialize visibility results table
+visibilityResults = zeros(3, length(weatherNames));
+
+% First, get peak values for clear weather (reference)
+clearImg = abs(slcImages{1});
+clearPeaks = zeros(3, 1);
+
+for t = 1:3
+    % Target center indices
+    tgtR = targetIndices(t,1);
+    tgtC = targetIndices(t,2);
+    
+    % Define window around target
+    rWin = max(1, tgtR-windowSize):min(size(clearImg,1), tgtR+windowSize);
+    cWin = max(1, tgtC-windowSize):min(size(clearImg,2), tgtC+windowSize);
+    
+    % Extract target window and get peak
+    targetWindow = clearImg(rWin, cWin);
+    clearPeaks(t) = max(targetWindow(:));
+    
+    % Clear weather is 100% visible by definition
+    visibilityResults(t, 1) = 100;
+end
+
+% Minimum detectability threshold (% of clear weather peak)
+minDetectable = 5; 
+
+% Analyze each weather condition
+for w = 2:length(weatherNames)  % Skip clear weather (already set to 100%)
+    % Get the corresponding SLC image
+    slcImg = abs(slcImages{w});
+    
+    % Analyze each target
+    for t = 1:3
+        % Target center indices
+        tgtR = targetIndices(t,1);
+        tgtC = targetIndices(t,2);
+        
+        % Define window around target
+        rWin = max(1, tgtR-windowSize):min(size(slcImg,1), tgtR+windowSize);
+        cWin = max(1, tgtC-windowSize):min(size(slcImg,2), tgtC+windowSize);
+        
+        % Extract target window
+        targetWindow = slcImg(rWin, cWin);
+        
+        % Find peak in window
+        peakValue = max(targetWindow(:));
+        
+        % Calculate relative visibility as percentage of clear weather peak
+        relativeVisibility = (peakValue / clearPeaks(t)) * 100;
+        
+        % If below minimum detectability, set to 0
+        if relativeVisibility < minDetectable
+            relativeVisibility = 0;
+        end
+        
+        % Store result
+        visibilityResults(t, w) = relativeVisibility;
+    end
+end
+
+% Print visibility results
+fprintf('\nTarget Visibility Results (Percentage relative to clear weather):\n');
+fprintf('%-12s', 'Weather:');
+for w = 1:length(weatherNames)
+    fprintf('%-12s', weatherNames{w});
+end
+fprintf('\n');
+
+for t = 1:3
+    fprintf('Target %d:   ', t);
+    for w = 1:length(weatherNames)
+        fprintf('%-10.1f%%', visibilityResults(t, w));
+    end
+    fprintf('\n');
+end
+
+% Convert to average visibility by condition
+fprintf('\nAverage Target Visibility By Weather Condition:\n');
+for w = 1:length(weatherNames)
+    avgVisibility = mean(visibilityResults(:, w));
+    fprintf('%s: %.1f%% visibility compared to clear weather\n', weatherNames{w}, avgVisibility);
+end
+
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Helper Functions (Provided)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % --- Helper function to generate random terrain ---
@@ -702,21 +827,20 @@ end
 
 % --- Helper function to create a plot for raw IQ data visualization ---
 function hRaw = helperPlotRawIQ(raw,minSample)
-    figure('Position',[750 100 600 400]);
     [m,n] = size(raw);
-    hRaw = pcolor(1:n,minSample:(m + minSample - 1),real(raw));
+    hRaw = pcolor(minSample:(m + minSample - 1),1:n,real(raw.'));
     hRaw.EdgeColor = 'none';
-    title('Real Part of Received Signal')
-    xlabel('Cross Range (m)')
-    ylabel('Range (m)')
+    title('Raw Data')
+    xlabel('Range Samples')
+    ylabel('Cross-range Samples')
     hC = colorbar;
     clim([-0.06 0.06])
-    hC.Label.String = 'Received Signal';
+    hC.Label.String = 'real(IQ)';
 end
 
 % --- Helper function to update the raw IQ data visualization plot ---
 function helperUpdatePlotRawIQ(hRaw,raw)
-    hRaw.CData = real(raw);
+    hRaw.CData = real(raw.');
     clim([-0.06 0.06]);
     drawnow limitrate;
 end
@@ -758,17 +882,17 @@ function helperPlotSLC(slcimg,minSample,fs,v,~,~,targetpos,xvec,yvec,A)
     y = linspace(0, 100, numPulses);
 
     slcimg = abs(slcimg).';
-    hProc = pcolor(y,rngVec,slcimg.');
+    hProc = pcolor(rngVec,y,slcimg);
     hProc.EdgeColor = 'none';
     colormap(hProc.Parent,parula)
     hC = colorbar('southoutside');
     hC.Label.String = 'Magnitude';
-    xlabel('Cross Range (m)')
-    ylabel('Range (m)')
+    xlabel('Slant Range (m)')
+    ylabel('Cross-range (m)')
     title('SAR Image')
     axis equal
-    ylim([1250 1420])
-    xlim([0 100])
+    xlim([1250 1420])
+    ylim([0 100])
 end
 
 % --- Helper function to get and display target visibility status ---
